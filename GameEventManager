@@ -1,0 +1,517 @@
+
+GameEventManager={}
+
+local GameEnemyQueue={}
+local GameEventQueue={}
+
+conditionIDs = enum({
+    "CONDITION_WAVE=1",
+    "CONDITION_LASTAREA",
+    
+    "CONDITION_MOVE=1",
+    "CONDITION_BLOON",
+    "CONDITION_START",
+    "CONDITION_QUEUEEND",
+
+    "CONDITION_ADDEMENYS=1",
+    "CONDITION_ADDEMENYTIMES",
+    "CONDITION_AREA",
+    "CONDITION_LOSER",
+})
+
+local EventDefault={
+    ID=0,
+    area=1,
+    delay=0,
+    position="0,0",
+    condition_ID=0,
+    condition_value=0,
+    isComplete=false,
+    isDone=false,
+    start_time=0,
+}
+
+local EnemyQueueDefault={
+    ID=0,
+    relation=0,
+    enemys={
+        --{ID=0,position="0,0",x=0,y=0,AI=0,speed=1}
+    },
+    isAppear=false,
+}
+
+local FBDataDefault={
+    ID=0,
+    position="0,0",
+    begin_x=0,
+    begin_y=0,
+    time=0,
+    areas={
+        --{ID=0,sx=0,ex=0}
+    },
+    condition_ID=0,
+    --condition_value="1",
+    condition_objs={},
+}
+
+----------------------------------------------------------------------
+local function GetHeroHP()
+    return GameManager.getHeroHpPercent()
+end
+
+local function SetHeroPos(x,y)
+    GameManager.setHeroPosition(x,y)
+end
+
+local function GetHeroPos()
+    return GameManager.getHeroPosition()
+end
+
+local function GetPositionXY(position)
+    local xy=string.split(position,",")
+    return tonumber(xy[1]),tonumber(xy[2])
+end
+
+local now_playing_area=1
+local max_playing_area
+
+local function UpdateHeroArea()
+
+    for key, area in pairs(FBDataDefault.areas) do
+        if area.ID>now_playing_area then
+            if GetHeroPos()>area.sx and GetHeroPos()<area.ex then
+                now_playing_area=area.ID
+                break
+            end
+        end
+    end
+    return now_playing_area
+end
+
+local function GetAreaPos(areaID)
+
+	local area = FBDataDefault.areas[areaID]
+	
+	if not area then return 0,0 end
+	
+    return area.sx,area.ex
+end
+
+local function GetMaxArea()
+    local max_area=1
+    for key, area in pairs(FBDataDefault.areas) do
+        if area.ID>max_area then
+            max_area=area.ID
+        end
+    end
+    return max_area
+end
+
+local function SetAreaPos(areaID)
+    GameManager.setArean(GetAreaPos(areaID))
+end
+
+local function SetRunningTime(time)
+    GameManager.setTime(time)
+end
+
+local function GetRunningTime()
+    return GameManager.getTime()
+end
+
+local function GameOver()
+    GameManager.gameFinish(false)
+    return true
+end
+----------------------------------------------------------------------
+
+function GameEventManager.RunEventFile(filename)
+
+    filename="Events/"..filename
+
+    GameEventManager.ResetDatas()
+    
+    local contentBytes=GameDataReader.readFromLocalFile(filename)
+
+    if not contentBytes then return end
+    
+    GameEventManager.LoadFileDatas(contentBytes)
+
+    GameEventManager.ConfigEvent()
+    
+    GameEventManager.Run()
+end
+
+function GameEventManager.LoadNetworkEventBytes(contentBytes)
+
+    GameEventManager.ResetDatas()
+
+    if not contentBytes then return end
+
+    GameEventManager.LoadFileDatas(contentBytes)
+end
+
+function GameEventManager.ConfigEvent()
+
+    now_playing_area=1
+
+    SetAreaPos(now_playing_area)
+    
+    SetHeroPos(FBDataDefault.begin_x,FBDataDefault.begin_y)
+    
+    SetRunningTime(FBDataDefault.time)
+    
+	PreloadGameEnemyRes()
+end
+
+function GameEventManager.Shutdown()
+    --outputString("GameEventManager.Shutdown()")
+
+    GameEventManager.Stop()
+    GameEventManager.ResetDatas()
+end
+
+function GameEventManager.Run()
+
+    GameEventManager.Stop()
+    
+    local function tick()
+        GameEventManager.UpdateProcess()
+    end
+    GameEventManager.schedulerID = cc.Director:getInstance():getScheduler():scheduleScriptFunc(tick, 0, false)
+end
+
+function GameEventManager.Stop()
+
+    if GameEventManager.schedulerID then
+        cc.Director:getInstance():getScheduler():unscheduleScriptEntry(GameEventManager.schedulerID)
+    end
+end
+
+function GameEventManager.UpdateProcess()
+    --outputString("GameEventManager.UpdateProcess()")
+    
+    ---[[
+    if GameEventManager.CheckFBComplete() then
+        GameManager.gameFinish(true)return
+	elseif GetRunningTime()<=0 or GameManager.HeroIsDead() then 
+        GameManager.gameFinish(false)return
+    end
+    --]]
+    
+    GameEventManager.CheckEventQueues()
+end
+
+function GameEventManager.ResetDatas()
+
+    table.clear(GameEnemyQueue)
+    table.clear(GameEventQueue)
+end
+
+function GameEventManager.LoadFileDatas(contentBytes)
+
+    local skip,count
+    
+    skip = GameEventManager.LoadFBDatas(contentBytes,skip)
+    
+    skip = GameEventManager.LoadEnemyQueueDatas(contentBytes,skip)
+    
+    skip = GameEventManager.LoadEventQueueDatas(contentBytes,skip)
+    
+    for key, event in pairs(GameEventQueue) do
+        for key, event in pairs(event.gameEvents) do
+            event.start_time=Time_GetCurrentTime()
+        end
+        event.start_time=Time_GetCurrentTime()
+    end
+    
+    return true
+end
+
+function GameEventManager.LoadFBDatas(contentBytes,skip)
+
+    skip,FBDataDefault.ID = GameDataReader.readInt(contentBytes,skip)
+    skip,FBDataDefault.condition_ID = GameDataReader.readInt(contentBytes,skip)
+    
+    ---[[
+    --skip,FBDataDefault.condition_value = GameDataReader.readString(contentBytes,skip)
+    table.clear(FBDataDefault.condition_objs)
+    local count,ID
+    skip, count = GameDataReader.readShort(contentBytes,skip)
+    outputString("LoadFBDatas condition_objs count:",count)
+    for i=1,count do
+        skip,ID = GameDataReader.readInt(contentBytes,skip)
+        table.insert(FBDataDefault.condition_objs,ID)
+    end
+    --]]
+    
+    skip,FBDataDefault.position = GameDataReader.readString(contentBytes,skip)
+    skip,FBDataDefault.time = GameDataReader.readInt(contentBytes,skip)
+    
+    FBDataDefault.begin_x,FBDataDefault.begin_y=GetPositionXY(FBDataDefault.position)
+
+    table.clear(FBDataDefault.areas)
+    local count
+    skip, count = GameDataReader.readShort(contentBytes,skip)
+    outputString("LoadFBDatas areas count:",count)
+    for i=1,count do
+        local tab={}
+        skip,tab.ID = GameDataReader.readInt(contentBytes,skip)
+        skip,tab.position = GameDataReader.readString(contentBytes,skip)
+        tab.sx,tab.ex=GetPositionXY(tab.position)
+        table.replace(FBDataDefault.areas,tab.ID,tab)
+    end
+    table.print(FBDataDefault,"---------------FBDataDefault----------------")
+    return skip
+end
+
+function GameEventManager.LoadEnemyQueueDatas(contentBytes,skip)
+
+    local count
+    skip, count = GameDataReader.readShort(contentBytes,skip)
+    outputString("LoadEnemyQueueDatas data count:",count)
+    
+    for i=1,count do
+        local table_data={}
+
+        table.copy(EnemyQueueDefault,table_data)
+
+        skip,table_data.ID = GameDataReader.readInt(contentBytes,skip)
+        skip,table_data.relation = GameDataReader.readInt(contentBytes,skip)
+
+        table_data.enemys={}
+        local count
+        skip, count = GameDataReader.readShort(contentBytes,skip)
+        for i=1,count do
+            local tab={}
+            skip,tab.ID = GameDataReader.readInt(contentBytes,skip)
+            skip,tab.position = GameDataReader.readString(contentBytes,skip)
+            tab.x,tab.y=GetPositionXY(tab.position)
+            skip,tab.AI = GameDataReader.readInt(contentBytes,skip)
+            skip,tab.speed = GameDataReader.readInt(contentBytes,skip)
+            table.insert(table_data.enemys,tab)
+        end
+        
+        table.replace(GameEnemyQueue,table_data.ID,table_data)
+    end
+    table.print(GameEnemyQueue,"---------------GameEnemyQueue----------------")
+    return skip
+end
+
+function GameEventManager.LoadEventQueueDatas(contentBytes,skip)
+    
+    local count
+    skip, count = GameDataReader.readShort(contentBytes,skip)
+    outputString("LoadEventQueueDatas data count:",count)
+
+	for i=1,count do
+        local table_data={}
+
+        table.copy(EventDefault,table_data)
+
+        skip,table_data.ID = GameDataReader.readInt(contentBytes,skip)
+        skip,table_data.area = GameDataReader.readInt(contentBytes,skip)
+        skip,table_data.condition_ID = GameDataReader.readInt(contentBytes,skip)
+        skip,table_data.delay = GameDataReader.readInt(contentBytes,skip)
+        
+        --unconfirmed
+        skip,table_data.condition_value = GameDataReader.readString(contentBytes,skip)
+
+        table_data.gameEvents={}
+        local count
+        skip, count = GameDataReader.readShort(contentBytes,skip)
+        for i=1,count do
+            local tab={}
+            
+            table.copy(EventDefault,tab)
+            
+            skip,tab.ID = GameDataReader.readInt(contentBytes,skip)
+            skip,tab.condition_ID = GameDataReader.readInt(contentBytes,skip)
+            
+            --unconfirmed
+            skip,tab.condition_value = GameDataReader.readInt(contentBytes,skip)
+            skip,tab.condition_value2 = GameDataReader.readString(contentBytes,skip)
+            skip,tab.condition_value3 = GameDataReader.readInt(contentBytes,skip)
+
+            table.replace(table_data.gameEvents,tab.ID,tab)
+        end
+        
+        table.replace(GameEventQueue,table_data.ID,table_data)
+    end
+    table.print(GameEventQueue,"---------------GameEventQueue----------------")
+    return skip
+end
+
+function GameEventManager.GetEnemyIDList()
+	local result={}
+	for key, var in pairs(GameEnemyQueue) do
+		for key, var in pairs(var.enemys) do
+			table.replace(result,var.ID,var.ID)
+		end
+	end
+	--table.print(result,"---------------result----------------")
+	return result
+end
+
+function GameEventManager.CheckFBComplete()
+
+    local isComplete=false
+    
+    if conditionIDs.CONDITION_WAVE==FBDataDefault.condition_ID then
+
+        --local condition_objs=string.split(FBDataDefault.condition_value,",")
+        
+        for key,qid in pairs(FBDataDefault.condition_objs) do
+            if not GameEnemyQueue[qid].isAppear then return false end
+            if not GameEventManager.CheckPosEnemys(qid) then return false end
+        end
+        isComplete=true
+        
+    elseif conditionIDs.CONDITION_LASTAREA==FBDataDefault.condition_ID then
+    
+        if not max_playing_area then
+            max_playing_area=GetMaxArea()
+        end
+        isComplete = (UpdateHeroArea()==max_playing_area)
+    end
+    
+    return isComplete
+end
+
+function GameEventManager.ClearAreaEventQueues()
+
+    for key, event in pairs(GameEventQueue) do
+        if event.area<now_playing_area then
+            table.clear(GameEventQueue[key]) GameEventQueue[key]=nil
+        end
+    end
+end
+
+function GameEventManager.CheckEventQueues()
+    
+    GameEventManager.ClearAreaEventQueues()
+    
+    for key, event in pairs(GameEventQueue) do
+        if event.area==now_playing_area then
+            if event.isDone then
+            --remove?
+            elseif event.isComplete then
+                if Time_GetDelayTime(event.start_time)>event.delay then
+                    event.isDone = GameEventManager.CheckEventList(event.gameEvents)==0
+                end
+            else
+                local isComplete=false
+                if conditionIDs.CONDITION_MOVE==event.condition_ID then
+                    local hx,hy = GetHeroPos()
+                    local tx,ty = GetPositionXY(event.condition_value)
+                    if hx > tx then
+                        isComplete=true
+                    end
+                elseif conditionIDs.CONDITION_BLOON==event.condition_ID then
+                    local hp = tonumber(event.condition_value)
+                    if GetHeroHP()<hp then
+                        isComplete=true
+                    end
+                elseif conditionIDs.CONDITION_START==event.condition_ID then
+                    isComplete=true
+                elseif conditionIDs.CONDITION_QUEUEEND==event.condition_ID then
+                    if (not GameEventQueue[event.condition_value]) then
+                    --isComplete=true
+                    elseif GameEventQueue[event.condition_value].isDone then
+                        isComplete=true
+                    end
+                end
+                if isComplete then
+                    event.isComplete=true
+                    event.start_time=Time_GetCurrentTime()
+                end
+            end
+        end
+    end
+end
+
+function GameEventManager.CheckEventList(eventList)
+
+    if not eventList then return 0 end
+
+    local event = eventList[1]
+
+    if not event then return 0 end
+    
+    if event.isComplete then
+        table.remove(eventList,1) event = eventList[1]
+        if not event then return 0 end
+    end
+    
+    GameEventManager.CompelEvent(event)
+
+    if conditionIDs.CONDITION_ADDEMENYS==event.condition_ID then
+        if event.isDone then
+            event.isComplete=GameEventManager.CheckPosEnemys(event.condition_value)
+        end
+    elseif conditionIDs.CONDITION_ADDEMENYTIMES==event.condition_ID then
+        event.isComplete=event.isDone
+    elseif conditionIDs.CONDITION_AREA==event.condition_ID then
+        if UpdateHeroArea() >= event.condition_value then
+            event.isComplete=true
+        end
+    elseif conditionIDs.CONDITION_LOSER==event.condition_ID then
+        event.isDone=GameOver()
+    end
+    
+    return #eventList
+end
+
+function GameEventManager.CompelEvent(event)
+
+    if event.isDone then return end
+
+    if conditionIDs.CONDITION_ADDEMENYS==event.condition_ID then
+        event.isDone=GameEventManager.AddPosEnemys(event.condition_value)
+    elseif conditionIDs.CONDITION_ADDEMENYTIMES==event.condition_ID then
+        if Time_GetDelayTime(event.start_time)>event.condition_value then
+            local condition_objs=string.split(event.condition_value2,",")
+			local wave_id=tonumber(condition_objs[event.area])
+			GameEventManager.AddPosEnemys(wave_id)
+            if event.area==#condition_objs then event.area=1
+            else event.area=event.area+1 end
+            event.start_time=Time_GetCurrentTime()
+            event.condition_value3=event.condition_value3-1
+        end
+        event.isDone=(event.condition_value3<=0)
+    elseif conditionIDs.CONDITION_AREA==event.condition_ID then
+        event.condition_value=now_playing_area+1
+        SetAreaPos(event.condition_value)
+        event.isDone=true
+    end
+end
+
+function GameEventManager.AddPosEnemys(qid)
+
+    if not GameEnemyQueue[qid] then return false end
+    
+    local enemyQueue = GameEnemyQueue[qid]
+    
+	outputString("enemyQueue----------",enemyQueue.ID)
+    GameManager.addMonster(enemyQueue)
+    
+    enemyQueue.isAppear=true
+    
+    return true
+end
+
+function GameEventManager.CheckPosEnemys(qid)
+    
+    local enemyList=GameManager.getEnemyList()
+    
+    if not enemyList then return false end
+    
+    for i=1,List.getSize(enemyList) do
+        if enemyList[i]._wave_id == qid then
+            return false
+        end
+    end
+
+    return true
+end
+
